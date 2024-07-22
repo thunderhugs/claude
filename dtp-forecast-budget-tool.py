@@ -14,7 +14,62 @@ st.set_page_config(layout="wide", initial_sidebar_state="expanded", page_icon=No
 # Custom CSS (unchanged)
 st.markdown("""
 <style>
-    /* ... (keep existing CSS) ... */
+    <style>
+    .main-content {
+        padding-left: 1rem;
+        padding-right: 1rem;
+    }
+    .reportview-container .main footer {visibility: hidden;}
+    .reportview-container .main {
+        padding-left: 2rem;
+        padding-right: 2rem;
+    }
+    .stMarkdown {
+        padding-bottom: 0;
+    }
+    .columns-container {
+        display: flex;
+        flex-direction: row;
+        gap: 2rem;
+    }
+    .column {
+        flex-basis: 0;
+        flex-grow: 1;
+        width: 100%;
+    }
+    .funnel-budget {
+        border: 1px solid #ccc;
+        border-radius: 5px;
+        box-shadow: 0 4px 6px rgba(0, 0, 0, 0.1);
+        padding: 0;  /* Remove the padding */
+    }
+                /* Add the CSS for the tooltip */
+    .info-tooltip {
+        position: relative;
+        display: inline-block;
+        border-bottom: 1px dotted black;
+    }
+    .info-tooltip .tooltiptext {
+        visibility: hidden;
+        width: 200px;
+        background-color: #555;
+        color: #fff;
+        text-align: center;
+        border-radius: 6px;
+        padding: 5px;
+        position: absolute;
+        z-index: 1;
+        bottom: 125%;
+        left: 50%;
+        margin-left: -100px;
+        opacity: 0;
+        transition: opacity 0.3s;
+    }
+    .info-tooltip:hover .tooltiptext {
+        visibility: visible;
+        opacity: 1;
+    }
+</style>
 </style>
 """, unsafe_allow_html=True)
 
