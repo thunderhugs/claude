@@ -66,12 +66,13 @@ for property_id in property_ids:
                     string_filter=Filter.StringFilter(
                         match_type=Filter.StringFilter.MatchType.EXACT,
                         value="HMN"
+                    )
                 )
             )
-        ))
+        )
 
-        # Run the report
-        response = admin_api.properties().list().execute()
+        # Run the report using the Analytics Data API client
+        response = client.run_report(request)
 
         for row in response.rows:
             data_row = [property_id] + [value.value for value in row.dimension_values]
