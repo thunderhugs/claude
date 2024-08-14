@@ -1,5 +1,5 @@
 from google.analytics.data_v1beta import BetaAnalyticsDataClient
-from google.analytics.data_v1beta.types import DateRange, Dimension, Metric, RunReportRequest
+from google.analytics.data_v1beta.types import DateRange, Dimension, Metric, RunReportRequest, FilterExpression, Filter
 from google.oauth2 import service_account
 from googleapiclient.discovery import build
 from datetime import datetime, timedelta
@@ -20,7 +20,7 @@ def list_ga4_properties():
     next_page_token = None
     
     while True:
-        response = admin_api.properties().list(pageToken=next_page_token).execute()
+        response = admin_api.properties().list(filter="ancestor:accounts/168819821", pageToken=next_page_token).execute()
         properties.extend(response.get('properties', []))
         next_page_token = response.get('nextPageToken')
         
@@ -60,19 +60,18 @@ for property_id in property_ids:
                 Metric(name="totalUsers"),
                 Metric(name="activeUsers")
             ],
-            dimension_filter={
-                "filter": {
-                    "field_name": "source",
-                    "string_filter": {
-                        "match_type": "EXACT",
-                        "value": "HMN"
-                    }
-                }
-            }
-        )
+            dimension_filter=FilterExpression(
+                filter=Filter(
+                    field_name="source",
+                    string_filter=Filter.StringFilter(
+                        match_type=Filter.StringFilter.MatchType.EXACT,
+                        value="HMN"
+                )
+            )
+        ))
 
         # Run the report
-        response = client.run_report(request)
+        response = admin_api.properties().list().execute()
 
         for row in response.rows:
             data_row = [property_id] + [value.value for value in row.dimension_values]
