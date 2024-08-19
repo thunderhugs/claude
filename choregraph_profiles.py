@@ -5,7 +5,6 @@ import os
 import datetime
 import snowflake.connector
 import plotly.express as px
-from concurrent.futures import ThreadPoolExecutor
 
 # Constants
 CURRENT_YEAR = datetime.datetime.now().year
@@ -52,20 +51,57 @@ def get_ailments():
     return pd.DataFrame(results, columns=column_names)
 
 @st.cache_data
-def get_ailment_data(selected_ailment, offset=0, limit=1000):
+def get_age_distribution(selected_ailment, sample_size=100000):
     query = f'''
-        SELECT * 
-        FROM PROD_US9_PAR_RPR.PRSP_LGM_RPT_USER_V 
-        WHERE AILMENT2_{selected_ailment} = 'Y' 
-        ORDER BY DATE_OF_BIRTH_YEAR  -- Add an ORDER BY clause for consistent pagination
-        LIMIT {limit} OFFSET {offset}
+        SELECT 
+            GENDER,
+            AVG(({CURRENT_YEAR} - DATE_OF_BIRTH_YEAR) - ({CURRENT_MONTH} - DATE_OF_BIRTH_MONTH_) / 12) as approx_age,
+            COUNT(*) as count
+        FROM 
+            (SELECT DATE_OF_BIRTH_YEAR, DATE_OF_BIRTH_MONTH_, GENDER
+             FROM PROD_US9_PAR_RPR.PRSP_LGM_RPT_USER_V 
+             WHERE AILMENT2_{selected_ailment} = 'Y'
+             ORDER BY RANDOM()
+             LIMIT {sample_size}
+            )
+        GROUP BY GENDER
+        ORDER BY GENDER
     '''
     cursor.execute(query)
     results = cursor.fetchall()
-    if not results:
-        return None
+    column_names = [column[0].lower() for column in cursor.description]  # convert column names to lowercase
+    df = pd.DataFrame(results, columns=column_names)
+    print(df.head())  # print the first few rows of the DataFrame
+    print(df.columns)  # print the column names of the DataFrame
+    return df
+
+@st.cache_data
+def get_category_distribution(selected_ailment, category_prefix, sample_size=100000):
+    columns = ", ".join([f"SUM(CASE WHEN {col} = 'Y' THEN 1 ELSE 0 END) as {col}" 
+                         for col in cursor.execute(f"SELECT column_name FROM information_schema.columns WHERE table_name = 'PRSP_LGM_RPT_USER_V' AND column_name LIKE '{category_prefix}%'").fetchall()])
+    
+    query = f'''
+        SELECT {columns}
+        FROM 
+            (SELECT *
+             FROM PROD_US9_PAR_RPR.PRSP_LGM_RPT_USER_V 
+             WHERE AILMENT2_{selected_ailment} = 'Y'
+             ORDER BY RANDOM()
+             LIMIT {sample_size}
+            )
+    '''
+    cursor.execute(query)
+    results = cursor.fetchall()
     column_names = [column[0] for column in cursor.description]
-    return pd.DataFrame(results, columns=column_names)
+    df = pd.DataFrame(results, columns=column_names)
+    
+    # Normalize the results
+    total = df.iloc[0].sum()
+    df = df.apply(lambda x: x / total)
+    
+    df = df.melt(var_name='Category', value_name='Proportion')
+    df['Category'] = df['Category'].str.replace(category_prefix, '').str.replace('_', ' ')
+    return df
 
 @st.cache_data
 def get_total_count(selected_ailment):
@@ -76,26 +112,6 @@ def get_total_count(selected_ailment):
     '''
     cursor.execute(query)
     return cursor.fetchone()[0]
-
-def process_chunk(df_chunk):
-    # Perform your data processing on the chunk
-    df_chunk['DATE_OF_BIRTH_YEAR'] = pd.to_numeric(df_chunk['DATE_OF_BIRTH_YEAR'], errors='coerce')
-    df_chunk['DATE_OF_BIRTH_MONTH_'] = pd.to_numeric(df_chunk['DATE_OF_BIRTH_MONTH_'], errors='coerce')
-    df_chunk['approx_age'] = CURRENT_YEAR - df_chunk['DATE_OF_BIRTH_YEAR'] - (CURRENT_MONTH - df_chunk['DATE_OF_BIRTH_MONTH_']) / 12
-    df_chunk['approx_age'] = df_chunk['approx_age'].clip(upper=100)
-    return df_chunk
-
-def create_category_plot(df, prefix, title):
-    columns = [col for col in df.columns if col.startswith(prefix)]
-    df_category = df[columns]
-    category_counts = df_category.apply(lambda x: (x == 'Y').sum()) / len(df)
-    category_counts = category_counts.reset_index()
-    category_counts.columns = ['Category', 'Index']
-    category_counts['Category'] = category_counts['Category'].str.replace(prefix, '').str.replace('_', ' ')
-    
-    fig = px.bar(category_counts, x='Index', y='Category', orientation='h', title=title)
-    fig.update_layout(yaxis={'categoryorder':'total ascending'})
-    return fig
 
 # Streamlit UI
 st.title("Choregraph Profiles")
@@ -110,56 +126,36 @@ if run_button:
     total_count = get_total_count(ailment)
     st.write(f"Total records for this ailment: {total_count}")
     
-    chunk_size = 1000
-    num_chunks = (total_count + chunk_size - 1) // chunk_size
+    with st.spinner("Fetching and processing data..."):
+        # Age distribution
+        df_age = get_age_distribution(ailment)
+        fig_age = px.bar(df_age, x="gender", y="count", color="gender",
+                 labels={'count':'Count', 'gender':'Gender'},
+                 title=f'Distribution of Gender (Avg Age: {df_age["approx_age"].mean():.2f})')
+        
+        # Category plots
+        fig_hobbies = px.bar(get_category_distribution(ailment, 'SURVEY_HOBBY_'), 
+                             x='Proportion', y='Category', orientation='h', title='Hobbies & Activities')
+        fig_music = px.bar(get_category_distribution(ailment, 'SURVEY_MUSIC_'), 
+                           x='Proportion', y='Category', orientation='h', title='Musical Tastes')
+        fig_owned = px.bar(get_category_distribution(ailment, 'SURVEY_OWN_'), 
+                           x='Proportion', y='Category', orientation='h', title='Owned Items')
+        fig_occupation = px.bar(get_category_distribution(ailment, 'SURVEY_OCCUPATION_'), 
+                                x='Proportion', y='Category', orientation='h', title='Occupations')
     
-    progress_bar = st.progress(0)
-    status_text = st.empty()
+    # Display plots in a grid
+    col1, col2, col3 = st.columns(3)
     
-    all_data = []
+    with col1:
+        st.plotly_chart(fig_age, use_container_width=True)
+        st.plotly_chart(fig_hobbies, use_container_width=True)
     
-    for i in range(num_chunks):
-        status_text.text(f"Processing chunk {i+1} of {num_chunks}...")
-        df_chunk = get_ailment_data(ailment, offset=i*chunk_size, limit=chunk_size)
-        if df_chunk is not None:
-            all_data.append(df_chunk)
-        progress_bar.progress((i + 1) / num_chunks)
+    with col2:
+        st.plotly_chart(fig_music, use_container_width=True)
+        st.plotly_chart(fig_owned, use_container_width=True)
     
-    if not all_data:
-        st.write("No data returned from the query.")
-    else:
-        status_text.text("Processing data...")
-        
-        # Use multithreading to process chunks in parallel
-        with ThreadPoolExecutor() as executor:
-            processed_chunks = list(executor.map(process_chunk, all_data))
-        
-        df_2 = pd.concat(processed_chunks, ignore_index=True)
-        status_text.text("Data processed successfully.")
-        
-        # Create plots
-        fig_age = px.histogram(df_2, x="approx_age", color="GENDER", nbins=100, 
-                               histnorm='probability density', labels={'approx_age':'Age'}, 
-                               title='Distribution of Age by Gender')
-        
-        fig_hobbies = create_category_plot(df_2, 'SURVEY_HOBBY_', 'Hobbies & Activities')
-        fig_music = create_category_plot(df_2, 'SURVEY_MUSIC_', 'Musical Tastes')
-        fig_owned = create_category_plot(df_2, 'SURVEY_OWN_', 'Owned Items')
-        fig_occupation = create_category_plot(df_2, 'SURVEY_OCCUPATION_', 'Occupations')
-        
-        # Display plots in a grid
-        col1, col2, col3 = st.columns(3)
-        
-        with col1:
-            st.plotly_chart(fig_age, use_container_width=True)
-            st.plotly_chart(fig_hobbies, use_container_width=True)
-        
-        with col2:
-            st.plotly_chart(fig_music, use_container_width=True)
-            st.plotly_chart(fig_owned, use_container_width=True)
-        
-        with col3:
-            st.plotly_chart(fig_occupation, use_container_width=True)
+    with col3:
+        st.plotly_chart(fig_occupation, use_container_width=True)
 
 # Close the Snowflake connection when the app is done
 st.cache_resource.clear()
