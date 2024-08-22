@@ -22,15 +22,25 @@ config.read(CONFIG_PATH)
 @st.cache_resource
 def get_snowflake_connection():
     return snowflake.connector.connect(
-    user = config.get("snowflake", "user", fallback=os.getenv("SNOWFLAKE_USER")),
-    password = config.get("snowflake", "password", fallback=os.getenv("SNOWFLAKE_PASSWORD")),
-    account= 'iqviaidporg-prdbus_reporting',
-    warehouse = config.get("snowflake", "warehouse", fallback=os.getenv("SNOWFLAKE_WAREHOUSE")),
-    schema = config.get("snowflake", "schema", fallback=os.getenv("SNOWFLAKE_SCHEMA")),
-    role = config.get("snowflake", "role", fallback=os.getenv("SNOWFLAKE_ROLE")))
+        user = config.get("snowflake", "user", fallback=os.getenv("SNOWFLAKE_USER")),
+        password = config.get("snowflake", "password", fallback=os.getenv("SNOWFLAKE_PASSWORD")),
+        account = 'iqviaidporg-prdbus_reporting',
+        warehouse = config.get("snowflake", "warehouse", fallback=os.getenv("SNOWFLAKE_WAREHOUSE")),
+        schema = config.get("snowflake", "schema", fallback=os.getenv("SNOWFLAKE_SCHEMA")),
+        role = config.get("snowflake", "role", fallback=os.getenv("SNOWFLAKE_ROLE"))
+    )
 
-ctx = get_snowflake_connection()
-cursor = ctx.cursor()
+# Create a function to execute queries
+@st.cache_data
+def execute_query(_conn, query):
+    with _conn.cursor() as cur:
+        cur.execute(query)
+        results = cur.fetchall()
+        column_names = [column[0] for column in cur.description]
+    return pd.DataFrame(results, columns=column_names)
+
+# Get Snowflake connection
+conn = get_snowflake_connection()
 
 # SQL queries
 AILMENT_QUERY = '''
@@ -46,10 +56,7 @@ AILMENT_QUERY = '''
 
 @st.cache_data
 def get_ailments():
-    cursor.execute(AILMENT_QUERY)
-    results = cursor.fetchall()
-    column_names = [column[0] for column in cursor.description]
-    return pd.DataFrame(results, columns=column_names)
+    return execute_query(conn, AILMENT_QUERY)
 
 @st.cache_data
 def get_age_distribution(selected_ailment, sample_size=100000):
@@ -68,16 +75,17 @@ def get_age_distribution(selected_ailment, sample_size=100000):
         GROUP BY GENDER
         ORDER BY GENDER
     '''
-    cursor.execute(query)
-    results = cursor.fetchall()
-    column_names = [column[0].lower() for column in cursor.description]  # convert column names to lowercase
-    df = pd.DataFrame(results, columns=column_names)
+    df = execute_query(conn, query)
+    df.columns = df.columns.str.lower()  # convert column names to lowercase
     return df
 
 @st.cache_data
 def get_category_distribution(selected_ailment, category_prefix, sample_size=100000):
-    columns = ", ".join([f"SUM(CASE WHEN {col[0]} = 'Y' THEN 1 ELSE 0 END) as {col[0]}" 
-                         for col in cursor.execute(f"SELECT column_name FROM information_schema.columns WHERE table_name = 'PRSP_LGM_RPT_USER_V' AND column_name LIKE '{category_prefix}%'").fetchall()])
+    # Get column names for the category
+    columns_query = f"SELECT column_name FROM information_schema.columns WHERE table_name = 'PRSP_LGM_RPT_USER_V' AND column_name LIKE '{category_prefix}%'"
+    columns_df = execute_query(conn, columns_query)
+    
+    columns = ", ".join([f"SUM(CASE WHEN {col} = 'Y' THEN 1 ELSE 0 END) as {col}" for col in columns_df['COLUMN_NAME']])
     
     query = f'''
         SELECT {columns}
@@ -89,10 +97,7 @@ def get_category_distribution(selected_ailment, category_prefix, sample_size=100
              LIMIT {sample_size}
             )
     '''
-    cursor.execute(query)
-    results = cursor.fetchall()
-    column_names = [column[0] for column in cursor.description]
-    df = pd.DataFrame(results, columns=column_names)
+    df = execute_query(conn, query)
     
     # Normalize the results
     total = df.iloc[0].sum()
@@ -113,8 +118,7 @@ def get_total_count(selected_ailment):
         FROM PROD_US9_PAR_RPR.PRSP_LGM_RPT_USER_V 
         WHERE AILMENT2_{selected_ailment} = 'Y'
     '''
-    cursor.execute(query)
-    return cursor.fetchone()[0]
+    return execute_query(conn, query).iloc[0, 0]
 
 # Streamlit UI
 st.title("Choregraph Profiles")
