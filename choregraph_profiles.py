@@ -22,13 +22,12 @@ config.read(CONFIG_PATH)
 @st.cache_resource
 def get_snowflake_connection():
     return snowflake.connector.connect(
-        user=config.get('snowflake', 'user'),
-        password=config.get('snowflake', 'password'),
-        account=config.get('snowflake', 'account'),
-        warehouse=config.get('snowflake', 'warehouse'),
-        schema=config.get('snowflake', 'schema'),
-        role=config.get('snowflake', 'role')
-    )
+    user = config.get("snowflake", "user", fallback=os.getenv("SNOWFLAKE_USER")),
+    password = config.get("snowflake", "password", fallback=os.getenv("SNOWFLAKE_PASSWORD")),
+    account= 'iqviaidporg-prdbus_reporting',
+    warehouse = config.get("snowflake", "warehouse", fallback=os.getenv("SNOWFLAKE_WAREHOUSE")),
+    schema = config.get("snowflake", "schema", fallback=os.getenv("SNOWFLAKE_SCHEMA")),
+    role = config.get("snowflake", "role", fallback=os.getenv("SNOWFLAKE_ROLE")))
 
 ctx = get_snowflake_connection()
 cursor = ctx.cursor()
