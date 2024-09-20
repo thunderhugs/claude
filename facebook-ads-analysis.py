@@ -10,6 +10,8 @@ from PIL import Image
 from io import BytesIO
 import matplotlib.pyplot as plt
 from matplotlib.gridspec import GridSpec
+from matplotlib import patches
+import textwrap
 
 # Set up logging
 logging.basicConfig(level=logging.INFO, format='%(asctime)s - %(levelname)s - %(message)s')
@@ -65,7 +67,7 @@ def execute_snowflake_query(ctx: snowflake.connector.SnowflakeConnection, query_
 def process_snowflake_data(df: pd.DataFrame) -> pd.DataFrame:
     """Process Snowflake data: filter for Black or African American and pivot the data to sum Sessions and Referrals."""
     # Filter for Black or African American
-    df_filtered = df[df['RACE'] == 'Black or African American']
+    df_filtered = df
     
     # Pivot the data to sum Sessions and Referrals
     df_pivoted = df_filtered.pivot_table(
@@ -82,34 +84,42 @@ def process_snowflake_data(df: pd.DataFrame) -> pd.DataFrame:
     
     return df_pivoted
 
-def create_ad_leaderboard(merged_df: pd.DataFrame, output_dir: Path):
+def create_ad_leaderboard(merged_df: pd.DataFrame, output_dir: Path, max_ads: int = 50):
     """Create a leaderboard of Facebook ads with their statistics, sorted by sessions."""
     # Sort ads by sessions in descending order
-    sorted_df = merged_df.sort_values(by='sessions', ascending=False)
+    sorted_df = merged_df.sort_values(by='sessions', ascending=False).head(max_ads)
     
     num_ads = len(sorted_df)
     rows = (num_ads + 2) // 3  # Number of rows in the grid, rounded up
     
-    fig = plt.figure(figsize=(30, 12 * rows))  # Increased figure size
-    gs = GridSpec(rows, 3, figure=fig, hspace=0.6, wspace=0.3)  # Increased spacing
+    # Adjust figure size based on the number of rows, ensure it's within limits
+    fig = plt.figure(figsize=(15, 5 * rows))
+    gs = GridSpec(rows, 3, figure=fig, hspace=0.6, wspace=0.3)
     
     for idx, (_, ad) in enumerate(sorted_df.iterrows()):
         ax = fig.add_subplot(gs[idx // 3, idx % 3])
         
         # Load and display the image
-        response = requests.get(ad['image_url'])
+        image_url = ad['image_url'] if pd.notna(ad['image_url']) else 'https://www.nomadfoods.com/wp-content/uploads/2018/08/placeholder-1-e1533569576673-1500x1500.png'
+        response = requests.get(image_url)
         img = Image.open(BytesIO(response.content))
         ax.imshow(img)
-        
+
         # Add semi-transparent overlay for better text visibility
         overlay = patches.Rectangle((0, 0), 1, 1, transform=ax.transAxes, alpha=0.6, facecolor='white')
         ax.add_patch(overlay)
         
+        #Function to wrap text
+        def wrap_text(text, width=30):
+            return textwrap.fill(text, width)
+
         # Add title
-        ax.text(0.5, 1.05, ad['title'], ha='center', va='bottom', fontsize=12, fontweight='bold', wrap=True, transform=ax.transAxes)
+        wrapped_title = wrap_text(ad['title'], 40)
+        ax.text(0.5, 1.05, wrapped_title, ha='center', va='bottom', fontsize=12, fontweight='bold', wrap=True, transform=ax.transAxes, bbox=dict(facecolor='white', alpha=0.8, edgecolor='none', pad=3))
         
         # Add body text
-        ax.text(0.5, -0.15, ad['body'], ha='center', va='top', fontsize=10, wrap=True, transform=ax.transAxes)
+        wrapped_body = wrap_text(ad['body'], 60)
+        ax.text(0.5, -0.15, wrapped_body, ha='center', va='top', fontsize=10, wrap=True, transform=ax.transAxes, bbox=dict(facecolor='white', alpha=0.8, edgecolor='none', pad=3))
         
         # Add statistics
         stats_text = f"Sessions: {ad['sessions']:,}\nReferrals: {ad['referrals']:,}"
@@ -120,7 +130,7 @@ def create_ad_leaderboard(merged_df: pd.DataFrame, output_dir: Path):
         
         ax.axis('off')
     
-    plt.tight_layout(pad=3.0, h_pad=3.0, w_pad=3.0)  # Increased padding
+    plt.tight_layout(pad=3.0, h_pad=3.0, w_pad=3.0)
     plt.savefig(output_dir / "ad_leaderboard.png", dpi=300, bbox_inches='tight')
     plt.close(fig)
     logging.info(f"Leaderboard saved to {output_dir / 'ad_leaderboard.png'}")
@@ -154,6 +164,7 @@ def main():
     # Merge Facebook and Snowflake data
     merged_df = pd.merge(df_facebook, df_snowflake_processed, left_on='id', right_on='CONTENT', how='right')
     merged_df = merged_df.drop(['CONTENT'], axis=1)
+    merged_df = merged_df.dropna(subset=['id'])
     
     # Create leaderboard and save results
     output_dir = script_dir / 'output'
