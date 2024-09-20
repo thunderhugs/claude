@@ -64,25 +64,28 @@ def execute_snowflake_query(ctx: snowflake.connector.SnowflakeConnection, query_
 
 def sum_statistics(merged_df: pd.DataFrame) -> pd.DataFrame:
     """Sum the statistics for each ad and return a new DataFrame."""
-    # Group by 'id' and 'Milestone', then sum the 'Value'
-    summed_stats = merged_df.groupby(['id', 'MILESTONE'])['VALUE'].sum().unstack(fill_value=0)
+    # Identify the metrics columns (all except 'id', 'title', 'body', 'image_url')
+    metric_columns = [col for col in merged_df.columns if col not in ['id', 'title', 'body', 'image_url']]
+    
+    # Group by 'id' and sum the metric columns
+    summed_stats = merged_df.groupby('id')[metric_columns].sum()
     
     # Merge the summed stats back with the original ad data
     ad_data = merged_df.drop_duplicates(subset=['id'])[['id', 'title', 'body', 'image_url']]
     return pd.merge(ad_data, summed_stats, on='id')
 
-def create_ad_leaderboard(summed_df: pd.DataFrame, output_dir: Path):
-    """Create a leaderboard of Facebook ads with their summed statistics, sorted by Impressions."""
-    # Sort ads by Impressions (screenings) in descending order
-    #sorted_df = summed_df.sort_values(by='Impressions', ascending=False)
+def create_ad_leaderboard(summed_df: pd.DataFrame, output_dir: Path, sort_by: str):
+    """Create a leaderboard of Facebook ads with their summed statistics, sorted by the specified metric."""
+    # Sort ads by the specified metric in descending order
+    sorted_df = summed_df.sort_values(by=sort_by, ascending=False)
     
-    num_ads = len(summed_df)
+    num_ads = len(sorted_df)
     rows = (num_ads + 2) // 3  # Number of rows in the grid, rounded up
     
     fig = plt.figure(figsize=(20, 7 * rows))
     gs = GridSpec(rows, 3, figure=fig, hspace=0.4, wspace=0.2)
     
-    for idx, (_, ad) in enumerate(summed_df.iterrows()):
+    for idx, (_, ad) in enumerate(sorted_df.iterrows()):
         ax = fig.add_subplot(gs[idx // 3, idx % 3])
         
         # Load and display the image
@@ -95,9 +98,7 @@ def create_ad_leaderboard(summed_df: pd.DataFrame, output_dir: Path):
         ax.text(0.5, -0.05, ad['body'], ha='center', va='top', fontsize=8, wrap=True, transform=ax.transAxes)
         
         # Add summed statistics
-        stats_text = f"Impressions: {ad['VALUE']:,}\n"
-        stats_text += f"Clicks: {ad['Clicks']:,}\n"
-        stats_text += f"Spend: ${ad['Spend']:,.2f}"
+        stats_text = "\n".join([f"{col}: {ad[col]:,}" for col in sorted_df.columns if col not in ['id', 'title', 'body', 'image_url']])
         ax.text(0.95, 0.95, stats_text, ha='right', va='top', fontsize=8, transform=ax.transAxes, bbox=dict(facecolor='white', alpha=0.8))
         
         # Add rank
@@ -129,8 +130,6 @@ def main():
         return
     df = pd.DataFrame(ads_data)
     
-    print(df.columns)
-
     # Connect to Snowflake and fetch data
     with connect_to_snowflake(config) as ctx:
         fb = execute_snowflake_query(ctx, script_dir / 'fb.sql')
@@ -142,11 +141,14 @@ def main():
     # Sum statistics for each ad
     summed_df = sum_statistics(merged_df)
     
+    # Determine which column to sort by (assuming the first metric column is the one to sort by)
+    sort_by = [col for col in summed_df.columns if col not in ['id', 'title', 'body', 'image_url']][0]
+    
     # Create leaderboard and save results
     output_dir = script_dir / 'output'
     output_dir.mkdir(exist_ok=True)
     
-    create_ad_leaderboard(summed_df, output_dir)
+    create_ad_leaderboard(summed_df, output_dir, sort_by)
     
     # Save the summed DataFrame to a CSV file
     summed_df.to_csv(output_dir / 'output_summed.csv', index=False)
