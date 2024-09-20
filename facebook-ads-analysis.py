@@ -62,28 +62,36 @@ def execute_snowflake_query(ctx: snowflake.connector.SnowflakeConnection, query_
     column_names = [column[0] for column in cursor.description]
     return pd.DataFrame(results, columns=column_names)
 
-def sum_statistics(merged_df: pd.DataFrame) -> pd.DataFrame:
-    """Sum the statistics for each ad and return a new DataFrame."""
-    # Identify the metrics columns (all except 'id', 'title', 'body', 'image_url')
-    metric_columns = [col for col in merged_df.columns if col not in ['id', 'title', 'body', 'image_url']]
+def process_snowflake_data(df: pd.DataFrame) -> pd.DataFrame:
+    """Process Snowflake data: filter for Black or African American and pivot the data to sum Sessions and Referrals."""
+    # Filter for Black or African American
+    df_filtered = df[df['RACE'] == 'Black or African American']
     
-    # Group by 'id' and sum the metric columns
-    summed_stats = merged_df.groupby('id')[metric_columns].sum()
+    # Pivot the data to sum Sessions and Referrals
+    df_pivoted = df_filtered.pivot_table(
+        values='VALUE', 
+        index='CONTENT', 
+        columns='MILESTONE', 
+        aggfunc='sum'
+    ).reset_index()
     
-    # Merge the summed stats back with the original ad data
-    ad_data = merged_df.drop_duplicates(subset=['id'])[['id', 'title', 'body', 'image_url']]
-    return pd.merge(ad_data, summed_stats, on='id')
+    # Ensure we have both 'sessions' and 'referrals' columns, fill with 0 if missing
+    for col in ['sessions', 'referrals']:
+        if col not in df_pivoted.columns:
+            df_pivoted[col] = 0
+    
+    return df_pivoted
 
-def create_ad_leaderboard(summed_df: pd.DataFrame, output_dir: Path, sort_by: str):
-    """Create a leaderboard of Facebook ads with their summed statistics, sorted by the specified metric."""
-    # Sort ads by the specified metric in descending order
-    sorted_df = summed_df.sort_values(by=sort_by, ascending=False)
+def create_ad_leaderboard(merged_df: pd.DataFrame, output_dir: Path):
+    """Create a leaderboard of Facebook ads with their statistics, sorted by sessions."""
+    # Sort ads by sessions in descending order
+    sorted_df = merged_df.sort_values(by='sessions', ascending=False)
     
     num_ads = len(sorted_df)
     rows = (num_ads + 2) // 3  # Number of rows in the grid, rounded up
     
-    fig = plt.figure(figsize=(20, 7 * rows))
-    gs = GridSpec(rows, 3, figure=fig, hspace=0.4, wspace=0.2)
+    fig = plt.figure(figsize=(30, 12 * rows))  # Increased figure size
+    gs = GridSpec(rows, 3, figure=fig, hspace=0.6, wspace=0.3)  # Increased spacing
     
     for idx, (_, ad) in enumerate(sorted_df.iterrows()):
         ax = fig.add_subplot(gs[idx // 3, idx % 3])
@@ -93,20 +101,26 @@ def create_ad_leaderboard(summed_df: pd.DataFrame, output_dir: Path, sort_by: st
         img = Image.open(BytesIO(response.content))
         ax.imshow(img)
         
-        # Add title and body text
-        ax.text(0.5, 1.05, ad['title'], ha='center', va='bottom', fontsize=10, fontweight='bold', wrap=True, transform=ax.transAxes)
-        ax.text(0.5, -0.05, ad['body'], ha='center', va='top', fontsize=8, wrap=True, transform=ax.transAxes)
+        # Add semi-transparent overlay for better text visibility
+        overlay = patches.Rectangle((0, 0), 1, 1, transform=ax.transAxes, alpha=0.6, facecolor='white')
+        ax.add_patch(overlay)
         
-        # Add summed statistics
-        stats_text = "\n".join([f"{col}: {ad[col]:,}" if pd.api.types.is_numeric_dtype(summed_df[col]) else f"{col}: {ad[col]}" for col in sorted_df.columns if col not in ['id', 'title', 'body', 'image_url']])
-        ax.text(0.95, 0.95, stats_text, ha='right', va='top', fontsize=8, transform=ax.transAxes, bbox=dict(facecolor='white', alpha=0.8))
+        # Add title
+        ax.text(0.5, 1.05, ad['title'], ha='center', va='bottom', fontsize=12, fontweight='bold', wrap=True, transform=ax.transAxes)
+        
+        # Add body text
+        ax.text(0.5, -0.15, ad['body'], ha='center', va='top', fontsize=10, wrap=True, transform=ax.transAxes)
+        
+        # Add statistics
+        stats_text = f"Sessions: {ad['sessions']:,}\nReferrals: {ad['referrals']:,}"
+        ax.text(0.95, 0.95, stats_text, ha='right', va='top', fontsize=10, transform=ax.transAxes, bbox=dict(facecolor='white', alpha=0.8, edgecolor='none', pad=3))
         
         # Add rank
-        ax.text(0.05, 0.95, f"Rank: {idx + 1}", ha='left', va='top', fontsize=10, fontweight='bold', transform=ax.transAxes, bbox=dict(facecolor='yellow', alpha=0.8))
+        ax.text(0.05, 0.95, f"Rank: {idx + 1}", ha='left', va='top', fontsize=12, fontweight='bold', transform=ax.transAxes, bbox=dict(facecolor='yellow', alpha=0.8, edgecolor='none', pad=3))
         
         ax.axis('off')
     
-    plt.tight_layout()
+    plt.tight_layout(pad=3.0, h_pad=3.0, w_pad=3.0)  # Increased padding
     plt.savefig(output_dir / "ad_leaderboard.png", dpi=300, bbox_inches='tight')
     plt.close(fig)
     logging.info(f"Leaderboard saved to {output_dir / 'ad_leaderboard.png'}")
@@ -128,31 +142,28 @@ def main():
     if not ads_data:
         logging.error("No data returned from the Facebook API.")
         return
-    df = pd.DataFrame(ads_data)
+    df_facebook = pd.DataFrame(ads_data)
     
     # Connect to Snowflake and fetch data
     with connect_to_snowflake(config) as ctx:
-        fb = execute_snowflake_query(ctx, script_dir / 'fb.sql')
+        df_snowflake = execute_snowflake_query(ctx, script_dir / 'fb.sql')
+    
+    # Process Snowflake data
+    df_snowflake_processed = process_snowflake_data(df_snowflake)
     
     # Merge Facebook and Snowflake data
-    merged_df = pd.merge(df, fb, left_on='id', right_on='CONTENT', how='right')
+    merged_df = pd.merge(df_facebook, df_snowflake_processed, left_on='id', right_on='CONTENT', how='right')
     merged_df = merged_df.drop(['CONTENT'], axis=1)
-    
-    # Sum statistics for each ad
-    summed_df = sum_statistics(merged_df)
-    
-    # Determine which column to sort by (assuming the first metric column is the one to sort by)
-    sort_by = [col for col in summed_df.columns if col not in ['id', 'title', 'body', 'image_url']][0]
     
     # Create leaderboard and save results
     output_dir = script_dir / 'output'
     output_dir.mkdir(exist_ok=True)
     
-    create_ad_leaderboard(summed_df, output_dir, sort_by)
+    create_ad_leaderboard(merged_df, output_dir)
     
-    # Save the summed DataFrame to a CSV file
-    summed_df.to_csv(output_dir / 'output_summed.csv', index=False)
-    logging.info(f"Summed data saved to {output_dir / 'output_summed.csv'}")
+    # Save the merged DataFrame to a CSV file
+    merged_df.to_csv(output_dir / 'output_merged.csv', index=False)
+    logging.info(f"Merged data saved to {output_dir / 'output_merged.csv'}")
 
 if __name__ == "__main__":
     main()
