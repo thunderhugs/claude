@@ -98,7 +98,7 @@ def create_ad_leaderboard(summed_df: pd.DataFrame, output_dir: Path, sort_by: st
         ax.text(0.5, -0.05, ad['body'], ha='center', va='top', fontsize=8, wrap=True, transform=ax.transAxes)
         
         # Add summed statistics
-        stats_text = "\n".join([f"{col}: {ad[col]:,}" for col in sorted_df.columns if col not in ['id', 'title', 'body', 'image_url']])
+        stats_text = "\n".join([f"{col}: {ad[col]:,}" if pd.api.types.is_numeric_dtype(summed_df[col]) else f"{col}: {ad[col]}" for col in sorted_df.columns if col not in ['id', 'title', 'body', 'image_url']])
         ax.text(0.95, 0.95, stats_text, ha='right', va='top', fontsize=8, transform=ax.transAxes, bbox=dict(facecolor='white', alpha=0.8))
         
         # Add rank
