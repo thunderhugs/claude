@@ -35,11 +35,17 @@ def create_ad_leaderboard(merged_df: pd.DataFrame, output_dir: Path, max_ads: in
             img_bottom = 0.5  # Position the bottom of the image at 50% of the ad height
             
             img_box = ax.get_position()
+            fig_width, fig_height = fig.get_size_inches() * fig.dpi
+            img_size = (int(img_box.width * fig_width * img_width), 
+                        int(img_box.height * fig_height * img_height))
+            
+            # Resize the image
+            img = img.resize(img_size, Image.LANCZOS)
+            
+            # Add the image to the figure
             fig.figimage(img, 
-                         img_box.x0 + img_box.width * 0.07, 
-                         fig.bbox.ymax - img_box.y0 - img_box.height * (img_bottom + img_height), 
-                         width=img_box.width * img_width, 
-                         height=img_box.height * img_height)
+                         img_box.x0 * fig_width + img_box.width * fig_width * 0.07, 
+                         (1 - img_box.y0 - img_box.height * (img_bottom + img_height)) * fig_height)
         except Exception as e:
             logging.error(f"Failed to load image for ad {idx + 1}: {str(e)}")
             ax.text(0.5, 0.6, "Image Unavailable", ha='center', va='center', fontsize=12, color='#888')
