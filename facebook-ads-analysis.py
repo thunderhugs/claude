@@ -38,7 +38,8 @@ def fetch_facebook_ads_data(api_url: str, params: Dict) -> List[Dict]:
             'id': ad.get('id'),
             'title': creative.get('title'),
             'body': creative.get('body'),
-            'image_url': creative.get('image_url')
+            'image_url': creative.get('image_url'),
+            'call_to_action_type': creative.get('call_to_action_type')
         })
     return ads_data
 
@@ -66,17 +67,20 @@ def execute_snowflake_query(ctx: snowflake.connector.SnowflakeConnection, query_
 
 def process_snowflake_data(df: pd.DataFrame) -> pd.DataFrame:
     """Process Snowflake data: filter for Black or African American and pivot the data to sum Sessions and Referrals."""
-    # Filter for Black or African American
-    df_filtered = df
     
     # Pivot the data to sum Sessions and Referrals
-    df_pivoted = df_filtered.pivot_table(
+    df_pivoted = df.pivot_table(
         values='VALUE', 
         index='CONTENT', 
         columns='MILESTONE', 
         aggfunc='sum'
     ).reset_index()
     
+    df_pivoted = df_pivoted.rename(columns={
+        'Sessions': 'sessions',
+        'Referrals': 'referrals'
+    })
+
     # Ensure we have both 'sessions' and 'referrals' columns, fill with 0 if missing
     for col in ['sessions', 'referrals']:
         if col not in df_pivoted.columns:
@@ -113,20 +117,22 @@ def create_ad_leaderboard(merged_df: pd.DataFrame, output_dir: Path, max_ads: in
         def wrap_text(text, width=30):
             return textwrap.fill(text, width)
 
-        # Add title
-        wrapped_title = wrap_text(ad['title'], 40)
-        ax.text(0.5, 1.05, wrapped_title, ha='center', va='bottom', fontsize=12, fontweight='bold', wrap=True, transform=ax.transAxes, bbox=dict(facecolor='white', alpha=0.8, edgecolor='none', pad=3))
-        
-        # Add body text
+        # Add body text at the top, left aligned
         wrapped_body = wrap_text(ad['body'], 60)
-        ax.text(0.5, -0.15, wrapped_body, ha='center', va='top', fontsize=10, wrap=True, transform=ax.transAxes, bbox=dict(facecolor='white', alpha=0.8, edgecolor='none', pad=3))
+        ax.text(0, 1.15, wrapped_body, ha='left', va='top', fontsize=10, wrap=True, transform=ax.transAxes, bbox=dict(facecolor='white', alpha=0.8, edgecolor='none', pad=3))
+        
+        # Add hardcoded URL and title below the image, with a grey background
+        url_and_title = f"librexia.com\n{ad['title']}"
+        ax.text(0, -0.15, url_and_title, ha='left', va='top', fontsize=10, wrap=True, transform=ax.transAxes, bbox=dict(facecolor='grey', alpha=0.8, edgecolor='none', pad=3))
+        
+        # Add call to action as a button to the right
+        ax.text(0.95, -0.15, ad['call_to_action_type'], ha='right', va='top', fontsize=10, wrap=True, transform=ax.transAxes, bbox=dict(facecolor='blue', alpha=0.8, edgecolor='none', pad=3))
         
         # Add statistics
-        stats_text = f"Sessions: {ad['sessions']:,}\nReferrals: {ad['referrals']:,}"
+        stats_text = f"Sessions: {ad['sessions']:,}"
+        if ad['referrals'] != 0:
+            stats_text += f"\nReferrals: {ad['referrals']:,}"
         ax.text(0.95, 0.95, stats_text, ha='right', va='top', fontsize=10, transform=ax.transAxes, bbox=dict(facecolor='white', alpha=0.8, edgecolor='none', pad=3))
-        
-        # Add rank
-        ax.text(0.05, 0.95, f"Rank: {idx + 1}", ha='left', va='top', fontsize=12, fontweight='bold', transform=ax.transAxes, bbox=dict(facecolor='yellow', alpha=0.8, edgecolor='none', pad=3))
         
         ax.axis('off')
     
@@ -165,7 +171,9 @@ def main():
     merged_df = pd.merge(df_facebook, df_snowflake_processed, left_on='id', right_on='CONTENT', how='right')
     merged_df = merged_df.drop(['CONTENT'], axis=1)
     merged_df = merged_df.dropna(subset=['id'])
-    
+    merged_df['sessions'] = pd.to_numeric(merged_df['sessions'], errors='coerce').fillna(0)
+    merged_df['referrals'] = pd.to_numeric(merged_df['referrals'], errors='coerce').fillna(0)
+
     # Create leaderboard and save results
     output_dir = script_dir / 'output'
     output_dir.mkdir(exist_ok=True)
