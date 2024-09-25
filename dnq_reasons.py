@@ -164,4 +164,21 @@ def main() -> None:
         # Create a DataFrame from the AI's categorization
         categories_df = pd.DataFrame(categorization_result['categories'])
         
-        # Sort the DataFrame by count
+        # Sort the DataFrame by count in descending order
+        categories_df = categories_df.sort_values('count', ascending=False)
+
+        # Display the results
+        print("Categories and Counts of Non-Enrollment Reasons:")
+        print(categories_df.to_string(index=False))
+
+        # Optionally, save the results to a CSV file
+        output_path = script_dir / 'non_enrollment_reasons_categories.csv'
+        categories_df.to_csv(output_path, index=False)
+        logging.info(f"Results saved to {output_path}")
+
+        logging.info("Analysis completed successfully")
+    except Exception as e:
+        logging.error(f"An error occurred: {e}")
+
+if __name__ == "__main__":
+    main()
