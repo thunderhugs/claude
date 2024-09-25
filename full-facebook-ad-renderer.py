@@ -95,8 +95,8 @@ def process_snowflake_data(df: pd.DataFrame) -> pd.DataFrame:
 
 def create_ad_leaderboard(merged_df: pd.DataFrame, output_dir: Path, max_ads: int = 50):
     """Create an HTML leaderboard of Facebook ads with their statistics, sorted by sessions."""
-    # Sort ads by sessions in descending order
-    sorted_df = merged_df.sort_values(by='sessions', ascending=False).head(max_ads)
+    # Sort ads by baa_referrals, baa_sessions, referrals, sessions in descending order
+    sorted_df = merged_df.sort_values(by=['baa_referrals', 'baa_sessions', 'referrals', 'sessions'], ascending=False).head(max_ads)
     
     html_content = """
     <!DOCTYPE html>
@@ -176,13 +176,11 @@ def create_ad_leaderboard(merged_df: pd.DataFrame, output_dir: Path, max_ads: in
             <img class="ad-image" src="{html.escape(str(ad['image_url']))}" alt="Ad Image" onerror="this.onerror=null;this.src='https://www.nomadfoods.com/wp-content/uploads/2018/08/placeholder-1-e1533569576673-1500x1500.png';">
             <div class="ad-title">{html.escape(str(ad['title']))}</div>
             <div class="ad-body">{html.escape(str(ad['body']))}</div>
-            <div class="ad-url">https://www.librexiaafstudy.com/</div>
+            <div class="ad-url">librexiaafstudy.com/</div>
             <div class="ad-cta">Learn More</div>
-            <div class="ad-stats">
-                B/AA Sessions: {ad['baa_sessions']:,}<br>
-                Pre Screener Sessions: {ad['sessions']:,}<br>
-                Referrals: {ad['referrals']:,}<br>
-                B/AA Referrals: {ad['baa_referrals']:,}
+            <div class="ad-stats">                
+                Pre Screener Sessions: {round(ad['sessions']):,} (B/AA: {round(ad['baa_sessions']):,})<br>
+                Referrals: {round(ad['referrals']):,} (B/AA: {round(ad['baa_referrals']):,})
             </div>
         </div>
         """
