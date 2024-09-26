@@ -86,6 +86,8 @@ def preprocess_and_analyze(df: pd.DataFrame, column: str) -> tuple:
     key_phrases = extract_key_phrases(df, 'Processed_Text')
     logging.info(f"Extracted key phrases: {', '.join(key_phrases)}")
     
+    print(df, key_phrases)
+
     return df, key_phrases
 
 def ask_ai_for_categories(df: pd.DataFrame, key_phrases: list, config: configparser.ConfigParser) -> dict:
@@ -108,11 +110,14 @@ def ask_ai_for_categories(df: pd.DataFrame, key_phrases: list, config: configpar
     logging.info("Sending request to AI model for categorization")
     try:
         response = client.chat.completions.create(
-            model="Qwen2-Beta-72B-Chat-vllm",
+            model="Qwen2-72B-Instruct-vllm",
             messages=[
                 {"role": "system", "content": "You're a data analyst specializing in clinical trial data. Your task is to categorize reasons for non-enrollment and provide counts for each category."},
                 {"role": "user", "content": f"""
                 Analyze the following data about clinical trial participants who did not qualify for the trial:
+                
+                Data Table: 
+                {df.to_string()}
 
                 Top Key Phrases:
                 {', '.join(key_phrases)}
@@ -123,27 +128,50 @@ def ask_ai_for_categories(df: pd.DataFrame, key_phrases: list, config: configpar
                 Based on this information:
                 1. Identify the main categories of reasons for non-enrollment.
                 2. Categorize each reason in the dataset into one of these categories.
-                3. Count the number of reasons in each category.
-                4. Return the results as a JSON object with the following structure:
-                   {{
-                       "categories": [
-                           {{"name": "Category Name 1", "count": 123}},
-                           {{"name": "Category Name 2", "count": 456}},
-                           ...
-                       ]
-                   }}
-                
+                3. Overwrite "NON_ENRL_RSN" with the category and return the updated data table.
+                4. Return Data Table with the updated "NON_ENRL_RSN" column ONLY.
+                5. No other text other than the Data Table to be returned. 
+
+                Output Template:
+
+                | NON_ENRL_RSN | Category | RANDOM_ID
+                |data from original table| derived category|data from original table
+
+
                 Ensure that the categories are clear, distinct, and cover all major reasons for non-enrollment.
                 """
                 },
             ]
         )
         logging.info("Received response from AI model")
-        return json.loads(response.choices[0].message.content)
+        # Log the raw response content for debugging
+        raw_response_content = response.choices[0].message.content
+        logging.debug(f"Raw response content: {raw_response_content}")
+
+        # Check if the response content is empty or not
+        if not raw_response_content.strip():
+            logging.error("Received an empty response from the AI model")
+            raise ValueError("Received an empty response from the AI model")
+
+         # Convert the raw response content into a list of rows
+        try:
+            data_lines = raw_response_content.strip().split("\n")
+            header = data_lines[0].replace("|", "").strip().split()
+            data = [line.replace("|", "").strip().split(" | ") for line in data_lines[1:]]
+            
+            # Create a DataFrame from the parsed data
+            result_df = pd.DataFrame(data, columns=header)
+        except Exception as parse_err:
+            logging.error(f"Error parsing response content: {parse_err}")
+            logging.error(f"Failed to parse response content: {raw_response_content}")
+            raise
+
+        return result_df
+
     except Exception as e:
         logging.error(f"Error in AI request: {e}")
         raise
-
+     
 def main() -> None:
     script_dir = Path(__file__).resolve().parent
     config_path = script_dir / 'config.ini'
@@ -158,14 +186,14 @@ def main() -> None:
         # Preprocess and analyze the data
         processed_df, key_phrases = preprocess_and_analyze(df_snowflake, 'NON_ENRL_RSN')
 
-        # Ask AI to categorize the reasons and provide counts
+        # Ask AI to categorize the reasons and output the results
         categorization_result = ask_ai_for_categories(processed_df, key_phrases, config)
 
         # Create a DataFrame from the AI's categorization
-        categories_df = pd.DataFrame(categorization_result['categories'])
+        categories_df = pd.DataFrame(categorization_result)
         
         # Sort the DataFrame by count in descending order
-        categories_df = categories_df.sort_values('count', ascending=False)
+        #categories_df = categories_df.sort_values('count', ascending=False)
 
         # Display the results
         print("Categories and Counts of Non-Enrollment Reasons:")
