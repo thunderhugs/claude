@@ -1,0 +1,35 @@
+SELECT 
+src_sys_stat_updt_desc,
+    CASE 
+        WHEN NON_ENRL_RSN_CD IN ('Does Not Meet Eligibility Criteria', 'Other') THEN 
+            CASE
+WHEN REGEXP_LIKE(lower(src_sys_stat_updt_desc), '(does\\s+not\\s+have\\s+a\\s+)?uc\\s+diagnosis|never\\s+diagnosed\\s+with\\s+uc|no\\s+active\\s+disease|does\\s+not\\s+have\\s+uc|.*no\\s+uc.*|not\\s+diagnosed\\s+with\\s+uc.*', 'i') THEN 'No UC Diagnosis'                WHEN REGEXP_LIKE(lower(src_sys_stat_updt_desc), 'comorbidity|.*comorbidities.*', 'i') THEN 'Comorbidity'
+                WHEN REGEXP_LIKE(lower(src_sys_stat_updt_desc), '.*not\\s+interested.*|.*hung\\s+up.*|not\\.*s+ready.*|.*no\\s+longer\\s+interested', 'i') THEN 'No longer Interested'
+                WHEN REGEXP_LIKE(lower(src_sys_stat_updt_desc), '.*stelara.*', 'i') THEN 'Stelera'
+                WHEN REGEXP_LIKE(lower(src_sys_stat_updt_desc), 'not\\s+in\\s+flare|.*not.*\\s+flare.*|not\\s+symptoms', 'i') THEN 'Not in Flare'
+                WHEN REGEXP_LIKE(lower(src_sys_stat_updt_desc), 'no\\s+show|unable\\s+to\\s+reach', 'i') THEN 'No Show / Unable to Reach'
+                WHEN REGEXP_LIKE(lower(src_sys_stat_updt_desc), 'exclusion\\s+\\#\\d+', 'i') THEN 'Exclusion'
+                WHEN REGEXP_LIKE(lower(src_sys_stat_updt_desc), 'not\\s+on\\s+required\\s+medication', 'i') THEN 'Not on Required Medication'
+                WHEN REGEXP_LIKE(lower(src_sys_stat_updt_desc), 'inadequate\\s+documentation', 'i') THEN 'Inadequate Documentation'
+                WHEN REGEXP_LIKE(lower(src_sys_stat_updt_desc), 'location\\s+far|.*travel.*|another\\s+country.*', 'i') THEN 'Transportation Issues'
+                WHEN REGEXP_LIKE(lower(src_sys_stat_updt_desc), 'not\\s+interested', 'i') THEN 'Participant Not Interested'
+                ELSE 'Other'
+            END
+        ELSE NON_ENRL_RSN_CD 
+    END AS NON_ENRL_RSN,
+    count(*)
+FROM 
+    PRDB_PROD.PROD_US9_PAR_RPR.V_RH_PRTCPNT_ENRL
+WHERE 
+    STDY_ID IN ('M23-784', 'M23-703')
+    AND prtcpnt_stat_cd IN (
+        'Contacted - Not Suitable',
+        'Pre-review Failed',
+        'Screen Failed'
+    )
+    AND non_enrl_rsn IS NOT NULL
+    AND LOWER(non_enrl_rsn) NOT IN ('test')
+    and lower(src_sys_stat_updt_desc) != 'test'
+GROUP BY 1,2
+ORDER by NON_ENRL_RSN DESC;
+
