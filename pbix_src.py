@@ -3,7 +3,7 @@ import shutil
 from configparser import ConfigParser
 from io import StringIO
 from datetime import datetime, timedelta
-
+from office365.sharepoint.files.file import File
 import pandas as pd
 import snowflake.connector
 from office365.runtime.auth.authentication_context import AuthenticationContext
@@ -30,8 +30,10 @@ def connect_to_sharepoint(config):
         ctx.load(web)
         ctx.execute_query()
         print("Connected to SharePoint site: {0}".format(web.properties['Title']))
+        return ctx  # Make sure to return the ctx object
     else:
         print(ctx_auth.get_last_error())
+        return None
 
 def connect_to_snowflake(config):
     ctx = snowflake.connector.connect(
@@ -144,6 +146,9 @@ def main():
     archive_existing_csvs(output_path)
     
     ctx = connect_to_sharepoint(config)
+    if ctx is None:
+        print("Failed to connect to SharePoint. Exiting.")
+        return
 
     # RH data
     rh_sql_file_path = os.path.join(script_dir, 'rh.sql')
