@@ -12,6 +12,7 @@ from google.auth.transport.requests import Request
 from google.oauth2 import service_account
 from google.analytics.data_v1beta import BetaAnalyticsDataClient
 from google.analytics.data_v1beta.types import DateRange, Dimension, Metric, RunReportRequest
+from io import BytesIO
 
 def read_config(config_path):
     config = ConfigParser()
@@ -70,23 +71,53 @@ def archive_existing_csvs(output_path):
     else:
         print("No existing CSV files to archive.")
 
+from office365.sharepoint.files.file import File
+
+from office365.sharepoint.files.file import File
+
 def write_to_csv(df, output_path, csv_file_name, ctx=None):
     csv_buffer = StringIO()
     df.to_csv(csv_buffer, index=False)
     csv_buffer.seek(0)
-    
+
     if output_path.startswith('https://'):
         # Upload to SharePoint
         if ctx is None:
             raise ValueError("ClientContext is required to upload to SharePoint")
+        
         file_content = csv_buffer.getvalue().encode('utf-8')
         target_url = f"{output_path}/{csv_file_name}"
-        File.save_binary_direct(ctx, target_url, file_content)
+        print(f"Uploading to SharePoint at {target_url}")
+        
+        try:
+            File.save_binary(ctx, target_url, file_content)
+            print(f"Successfully uploaded {csv_file_name} to SharePoint.")
+        except Exception as e:
+            print(f"Failed to upload {csv_file_name} to SharePoint: {e}")
     else:
         # Save to local file system
         output_file = os.path.join(output_path, csv_file_name)
         with open(output_file, 'w', newline='', encoding='utf-8') as f:
             f.write(csv_buffer.getvalue())
+        print(f"File saved locally at {output_file}")
+
+def upload_file_to_sharepoint(site_url, username, password, folder_path, file_name, df):
+    from io import StringIO
+
+    ctx_auth = AuthenticationContext(url=site_url)
+    if ctx_auth.acquire_token_for_user(username, password):
+        ctx = ClientContext(site_url, ctx_auth)
+
+        csv_buffer = StringIO()
+        df.to_csv(csv_buffer, index=False)
+        file_content = csv_buffer.getvalue().encode("utf-8")
+
+        target_folder = ctx.web.get_folder_by_server_relative_url(folder_path)
+        target_file = target_folder.upload_file(file_name, file_content)
+        ctx.execute_query()
+        print(f"File '{file_name}' has been uploaded to SharePoint folder '{folder_path}'.")
+    else:
+        print(ctx_auth.get_last_error())
 
 def get_ga_data(credentials_file, property_id, start_date, end_date):
     credentials = service_account.Credentials.from_service_account_file(credentials_file)
@@ -150,17 +181,21 @@ def main():
         print("Failed to connect to SharePoint. Exiting.")
         return
 
+    sp_username = config.get("windows", "user")
+    sp_password = config.get("windows", "password")
+    site_url = 'https://quintiles.sharepoint.com/sites/Direct_to_Patient-Marketing_Operations'
+
     # RH data
     rh_sql_file_path = os.path.join(script_dir, 'rh.sql')
     rh_df = execute_query(cursor, rh_sql_file_path)
     write_to_csv(rh_df, output_path, "nocion_aspire_rh_details.csv")
-    write_to_csv(rh_df, output_path_sp, "nocion_aspire_rh_details.csv", ctx)
+    upload_file_to_sharepoint(site_url, sp_username, sp_password, output_path_sp, "nocion_aspire_rh_details.csv", rh_df)
 
     # TMDH data 
     tmdh_sql_file_path = os.path.join(script_dir, 'tmdh.sql')
     tmdh_df = execute_query(cursor, tmdh_sql_file_path)
     write_to_csv(tmdh_df, output_path, "nocion_aspire_tmdh.csv")
-    write_to_csv(tmdh_df, output_path_sp, "nocion_aspire_tmdh.csv", ctx)
+    #write_to_csv(tmdh_df, output_path_sp, "nocion_aspire_tmdh.csv", ctx)
     
     # Google Analytics data
     credentials_file = r'C:\Users\q1032269\OneDrive - IQVIA\Documents\config-keys\Quickstart-10783ca848cb.json'
@@ -171,14 +206,13 @@ def main():
     ga_df = get_ga_data(credentials_file, property_id, start_date, end_date)
     ga_df = transform_ga_data(ga_df)
     write_to_csv(ga_df, output_path, "nocion_aspire_ga.csv")
-    write_to_csv(ga_df, output_path_sp, "nocion_aspire_ga.csv", ctx)
+    #write_to_csv(ga_df, output_path_sp, "nocion_aspire_ga.csv", ctx)
         
     # Pre Screener data
     sg_sql_file_path = os.path.join(script_dir, 'sg.sql')
     sg_df = execute_query(cursor, sg_sql_file_path)
     write_to_csv(sg_df, output_path, "nocion_aspire_survey_responses.csv")
-    write_to_csv(sg_df, output_path_sp, "nocion_aspire_survey_responses.csv", ctx)
+    #write_to_csv(sg_df, output_path_sp, "nocion_aspire_survey_responses.csv", ctx)
     
 if __name__ == "__main__":
     main()
-
