@@ -150,14 +150,12 @@ def main():
     rh_df = execute_query(cursor, rh_sql_file_path)
     write_to_csv(rh_df, output_path, "nocion_aspire_rh_details.csv")
     write_to_csv(rh_df, output_path_sp, "nocion_aspire_rh_details.csv", ctx)
-    write_to_csv(tmdh_df, output_path_sp, "nocion_aspire_tmdh.csv", ctx)
-    write_to_csv(ga_df, output_path_sp, "nocion_aspire_ga.csv", ctx)
-    write_to_csv(sg_df, output_path_sp, "nocion_aspire_survey_responses.csv", ctx)
 
     # TMDH data 
     tmdh_sql_file_path = os.path.join(script_dir, 'tmdh.sql')
     tmdh_df = execute_query(cursor, tmdh_sql_file_path)
     write_to_csv(tmdh_df, output_path, "nocion_aspire_tmdh.csv")
+    write_to_csv(tmdh_df, output_path_sp, "nocion_aspire_tmdh.csv", ctx)
     
     # Google Analytics data
     credentials_file = r'C:\Users\q1032269\OneDrive - IQVIA\Documents\config-keys\Quickstart-10783ca848cb.json'
@@ -168,11 +166,14 @@ def main():
     ga_df = get_ga_data(credentials_file, property_id, start_date, end_date)
     ga_df = transform_ga_data(ga_df)
     write_to_csv(ga_df, output_path, "nocion_aspire_ga.csv")
+    write_to_csv(ga_df, output_path_sp, "nocion_aspire_ga.csv", ctx)
         
     # Pre Screener data
     sg_sql_file_path = os.path.join(script_dir, 'sg.sql')
     sg_df = execute_query(cursor, sg_sql_file_path)
     write_to_csv(sg_df, output_path, "nocion_aspire_survey_responses.csv")
+    write_to_csv(sg_df, output_path_sp, "nocion_aspire_survey_responses.csv", ctx)
     
 if __name__ == "__main__":
     main()
+
