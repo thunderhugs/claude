@@ -12,7 +12,7 @@ import json
 from datetime import datetime
 import logging
 
-logging.basicConfig(level=logging.INFO, format='%(asctime)s - %(levelname)s - %(message)s')
+logging.basicConfig(level=logging.DEBUG, format='%(asctime)s - %(levelname)s - %(message)s')
 
 def generate_user_agent():
     base_name = "LibrexiaSiteMapper"
@@ -77,10 +77,10 @@ def get_location(address, geolocator, geocode_cache):
                 logging.error(f"Failed to geocode {address} after {max_retries} attempts: {str(e)}")
                 return None
 
-def create_circle(row, lat, lon, index):
+def create_circle(row, lat, lon):
     radius = row['Total Referrals'] * 100  # Adjusted for visibility, you may need to fine-tune this
     color = get_circle_color(row)
-    circle = folium.Circle(
+    return folium.Circle(
         location=[lat, lon],
         radius=radius,
         color=color,
@@ -89,11 +89,6 @@ def create_circle(row, lat, lon, index):
         fill_opacity=0.7,
         popup=f"Protocol: {row['Protocol Number']}<br>Site No.: {row['Site Number']}<br>Site Name: {row['Site Name']}",
     )
-    
-    # Add custom JavaScript to handle mouseover events
-    circle.add_to(folium.FeatureGroup(name=f'circle_{index}'))
-    
-    return circle
 
 def get_circle_color(row):
     if 'D&I Potential' in row:
@@ -108,8 +103,7 @@ def get_circle_color(row):
 def create_map(df, geocode_cache):
     user_agent = generate_user_agent()
     geolocator = Nominatim(user_agent=user_agent, timeout=50)
-    map_object = folium.Map()
-    centers = []
+    map_object = folium.Map(location=[0, 0], zoom_start=2)  # Start with a world view
     
     geocoding_success = 0
     geocoding_failure = 0
@@ -120,63 +114,24 @@ def create_map(df, geocode_cache):
 
         if location is not None:
             lat, lon = location.latitude, location.longitude
-            centers.append((lat, lon))
-            circle = create_circle(row, lat, lon, index)
+            circle = create_circle(row, lat, lon)
             circle.add_to(map_object)
             geocoding_success += 1
             
-            # Add custom JavaScript to handle mouseover events
-            map_object.get_root().script.add_child(folium.Element(f"""
-                document.getElementsByName('circle_{index}')[0].on('mouseover', function (e) {{
-                    highlightTableRow({index});
-                }});
-                document.getElementsByName('circle_{index}')[0].on('mouseout', function (e) {{
-                    unhighlightTableRow({index});
-                }});
-            """))
+            # Add a marker for debugging
+            folium.Marker([lat, lon], popup=f"Debug: {address}").add_to(map_object)
         else:
             logging.warning(f"Could not find coordinates for {address}")
             geocoding_failure += 1
 
-    fit_map_to_points(map_object, centers)
-    add_legend(map_object)
-    
     logging.info(f"Geocoding results: {geocoding_success} successes, {geocoding_failure} failures")
     return map_object
-
-def fit_map_to_points(map_object, centers):
-    if centers:
-        mean_lat = sum(lat for lat, _ in centers) / len(centers)
-        mean_lon = sum(lon for _, lon in centers) / len(centers)
-        map_object.location = [mean_lat, mean_lon]
-        map_object.zoom_start = 4
-
-        min_lat, max_lat = min(lat for lat, _ in centers), max(lat for lat, _ in centers)
-        min_lon, max_lon = min(lon for _, lon in centers), max(lon for _, lon in centers)
-        map_object.fit_bounds([[min_lat, min_lon], [max_lat, max_lon]])
-    else:
-        logging.warning("No valid coordinates found. Map will use default view.")
-
-def add_legend(map_object):
-    legend_html = """
-    <div style='position: fixed; bottom: 50px; left: 50px; width: 220px; height: 120px; 
-    border:2px solid grey; z-index:9999; font-size:14px; background-color: white;'>
-    <div style='position: relative; top: 3px; left: 3px; padding: 5px;'>
-    <b>Legend</b><br>
-    <i style='background:#27ae60;'>&nbsp;&nbsp;&nbsp;&nbsp;</i> High Potential/High Enrolling<br>
-    <i style='background:#f1c40f;'>&nbsp;&nbsp;&nbsp;&nbsp;</i> High Potential/Low Enrolling<br>
-    <i style='background:#f39c12;'>&nbsp;&nbsp;&nbsp;&nbsp;</i> Low Potential/High Enrolling<br>
-    <i style='background:#e74c3c;'>&nbsp;&nbsp;&nbsp;&nbsp;</i> Low Potential/Low Enrolling
-    </div>
-    </div>
-    """
-    map_object.get_root().html.add_child(folium.Element(legend_html))
 
 def create_data_table(df):
     table_rows = []
     for index, row in df.iterrows():
         table_rows.append(f"""
-        <tr id="row-{index}" onmouseover="highlightTableRow({index})" onmouseout="unhighlightTableRow({index})">
+        <tr id="row-{index}">
             <td>{row['Protocol Number']}</td>
             <td>{row['Site Number']}</td>
             <td>{row['Site Name']}</td>
@@ -246,35 +201,6 @@ def create_single_html(map_object, data_table_html):
     table tbody tr:nth-child(even) {
         background-color: #f3f3f3;
     }
-    .highlighted {
-        background-color: #ffff99 !important;
-    }
-    """
-    
-    js_script = """
-    <script>
-    function highlightTableRow(index) {
-        var row = document.getElementById('row-' + index);
-        if (row) {
-            row.classList.add('highlighted');
-        }
-        var circle = document.getElementsByName('circle_' + index)[0];
-        if (circle) {
-            circle.setStyle({fillOpacity: 1, weight: 3});
-        }
-    }
-
-    function unhighlightTableRow(index) {
-        var row = document.getElementById('row-' + index);
-        if (row) {
-            row.classList.remove('highlighted');
-        }
-        var circle = document.getElementsByName('circle_' + index)[0];
-        if (circle) {
-            circle.setStyle({fillOpacity: 0.7, weight: 1});
-        }
-    }
-    </script>
     """
     
     html_content = f"""
@@ -283,7 +209,6 @@ def create_single_html(map_object, data_table_html):
     <head>
         <title>Janssen Librexia Site Overlap</title>
         <style>{css_styles}</style>
-        {js_script}
     </head>
     <body>
         <div class="container">
