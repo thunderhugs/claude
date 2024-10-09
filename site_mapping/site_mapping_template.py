@@ -18,38 +18,12 @@ except FileNotFoundError:
     geocode_cache = {}
 
 # Read the CSV file
-csv_file = r'C:\Users\q1032269\OneDrive - IQVIA\Documents\Python\Study Specific\site_lists\active_sites.csv'
+csv_file = r'C:\Users\q1032269\OneDrive - IQVIA\Documents\Python\Reporting Automation\Janssen\Librexia\_site_heat_map\dei_data_sites.csv'
 df = pd.read_csv(csv_file)
 df.columns = df.columns.str.strip()
 
-
-# Drop the specified columns
-df = df.drop(columns=['Warm Transfer Availability', 'Warm Transfer Last Name', 'Warm Transfer Phone Number', 'Warm Transfer Extension', 'Override Site Address'])
-
-# Iterate over each column in the DataFrame
-for col in df.columns:
-    # Check if there is a corresponding "Override" column
-    override_col = "Override " + col
-    if override_col in df.columns:
-        # Handle specific edge case
-        if col == 'Protocol Number' and 'Project: Override Protocol Number' in df.columns:
-            df[col] = np.where(df[col].isna(), df['Project: Override Protocol Number'], df[col])
-        else:
-            # Combine the two columns
-            df[col] = np.where(df[col].isna(), df[override_col], df[col])
-        # Drop the "Override" column
-        df = df.drop(columns=[override_col])
-
-# Handle the case for 'Protocol Number' and 'Project: Override Protocol Number' if not handled inside the loop
-if 'Protocol Number' in df.columns and 'Project: Override Protocol Number' in df.columns:
-    df['Protocol Number'] = np.where(df['Protocol Number'].isna(), df['Project: Override Protocol Number'], df['Protocol Number'])
-    df = df.drop(columns=['Project: Override Protocol Number'])
-
-# Filter the DataFrame based on Protocol Number
-df = df[df['Protocol Number'].isin(['67953964MDD3002', '67953964MDD3001'])]
-
 # Create a geolocator object
-geolocator = Nominatim(user_agent="agentSmithers", timeout=20)
+geolocator = Nominatim(user_agent="agentSmitherz2", timeout=50)
 
 # List to store the circle polygons and their centers
 circles = []
@@ -61,7 +35,7 @@ map_object = folium.Map()
 # Iterate over the rows of the dataframe
 for index, row in df.iterrows():
     # Get the address from the dataframe
-    address = f"{row['Site City']}, {row['Site State/County']}, {row['Site Country']}, {row['Site Postal/Zip Code']}"
+    address = f"{row['Site City']}, , {row['Country']}, {row['Zip Code']}"
 
     # Check if the address is in the cache
     if address in geocode_cache:
@@ -79,7 +53,7 @@ for index, row in df.iterrows():
         centers.append((lat, lon))
 
         # Get the radius for referrals in miles and convert it to meters
-        radius = row['Radius for Referrals'] * 1609.34
+        radius = row['Total Referrals'] * 1609.34
 
         # Create a circle polygon
         circle = Point(lon, lat).buffer(radius)
@@ -91,10 +65,14 @@ for index, row in df.iterrows():
         circles.append(circle)
 
         # Create a circle on the map with different color based on overlap
-        if 'Protocol Number' in row and row['Protocol Number'] == '67953964MDD3001':  # Use '==' for comparison
-            color = '#fbc531'
+        if 'D&I Potential' in row and row['D&I Potential'] == 'High Potential/Low Enrolling':
+            color = '#f1c40f'
+        elif 'D&I Potential' in row and row['D&I Potential'] == 'High Potential/High Enrolling':
+            color = '#27ae60'
+        elif 'D&I Potential' in row and row['D&I Potential'] == 'Low Potential/High Enrolling':
+            color = '#f39c12'
         else:
-            color = '#00a8ff' 
+            color = '#e74c3c' 
         folium.Circle(
             location=[lat, lon],
             radius=radius,
@@ -136,8 +114,10 @@ class LegendControl(MacroElement):
             legend.onAdd = function (map) {
                 var div = L.DomUtil.create('div', 'info legend');
                 div.innerHTML += '<b>Legend</b><br>';
-                div.innerHTML += '<i style="background: #fbc531"></i> Ventura 1<br>';
-                div.innerHTML += '<i style="background: #00a8ff"></i> Ventura 2';
+                div.innerHTML += '<i style="background: #27ae60"></i> High Potential/High Enrolling<br>';
+                div.innerHTML += '<i style="background: #f39c12"></i> High Potential/Low Enrolling<br>';
+                div.innerHTML += '<i style="background: #f39c12"></i> Low Potential/High Enrolling<br>';
+                div.innerHTML += '<i style="background: #e74c3c"></i> Low Potential/Low Enrolling<br>';
                 return div;
             };
             legend.addTo({{this._parent.get_name()}});
@@ -170,7 +150,7 @@ map_object.get_root().header.add_child(folium.Element("""
 map_object.add_child(LegendControl())
 
 # Save the map as an HTML file
-map_object.save(r'C:\Users\q1032269\OneDrive - IQVIA\Documents\Python\Study Specific\Janssen\site_map.html')
+map_object.save(r'C:\Users\q1032269\OneDrive - IQVIA\Documents\Python\Reporting Automation\Janssen\Librexia\_site_heat_map\site_map.html')
 
 html_table = df.to_html(classes='container', index=False)
 
@@ -221,7 +201,7 @@ html_dt = f"""
 """
 
 # Define the output path
-output_path = r'C:\Users\q1032269\OneDrive - IQVIA\Documents\Python\Study Specific\Janssen\data_table.html'
+output_path = r'C:\Users\q1032269\OneDrive - IQVIA\Documents\Python\Reporting Automation\Janssen\Librexia\_site_heat_map\data_table.html'
 
 # Write the HTML string a file
 with open(output_path, 'w') as f:
@@ -249,7 +229,7 @@ body {
 </style>
 </head>
 <body>
-<h1>Janssen Ventura Site Overlap</h1>
+<h1>Janssen Librexia Site Overlap</h1>
 <div class="frame-container">
     <iframe class="iframe" src="site_map.html"></iframe>
     <iframe class="iframe" src="data_table.html"></iframe>
@@ -259,7 +239,7 @@ body {
 """
 
 # Define the output path
-output_path = r'C:\Users\q1032269\OneDrive - IQVIA\Documents\Python\Study Specific\Janssen\ventura_sites_mapped.html'
+output_path = r'C:\Users\q1032269\OneDrive - IQVIA\Documents\Python\Reporting Automation\Janssen\Librexia\_site_heat_map\librexia_sites_mapped.html'
 
 # Write the HTML string to a file
 with open(output_path, 'w') as f:
